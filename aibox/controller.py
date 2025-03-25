@@ -31,7 +31,7 @@ import cv2
 
 # Object tracking
 import torch
-from labels import coco_labels # COCO labels dictionary
+from .labels import coco_labels # COCO labels dictionary
 from yolov5.models.common import DetectMultiBackend
 from yolov5.utils.dataloaders import IMG_FORMATS, VID_FORMATS, LoadImages, LoadScreenshots, LoadStreams
 from yolov5.utils.general import (LOGGER, Profile, check_file, check_img_size, check_imshow, check_requirements, colorstr, cv2,
