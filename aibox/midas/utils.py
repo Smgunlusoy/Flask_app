@@ -5,6 +5,7 @@ import re
 import numpy as np
 import cv2
 import torch
+import portalocker  # Added for cross-platform file locking
 
 
 def read_pfm(path):
@@ -197,3 +198,10 @@ def write_depth(path, depth, grayscale, bits=1):
         cv2.imwrite(path + ".png", out.astype("uint16"))
 
     return
+
+# Added cross-platform file locking functions
+def lock_file(file):
+    portalocker.lock(file, portalocker.LOCK_EX)
+
+def unlock_file(file):
+    portalocker.unlock(file)

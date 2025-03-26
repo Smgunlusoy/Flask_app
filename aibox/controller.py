@@ -8,6 +8,11 @@ This script is using code from the following sources:
 
 import sys
 from pathlib import Path
+import os
+
+# Ensure the aibox directory is in the PYTHONPATH
+aibox_path = os.path.join(os.path.dirname(__file__), '..', 'aibox')
+sys.path.append(aibox_path)
 
 # Use the project file packages instead of the conda packages, i.e. add to system path for import
 file = Path(__file__).resolve()

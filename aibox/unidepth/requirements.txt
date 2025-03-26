@@ -26,7 +26,7 @@ imageio
 imath
 iopath
 isort
-Jinja2pip li
+Jinja2
 jmespath
 kiwisolver
 MarkupSafe

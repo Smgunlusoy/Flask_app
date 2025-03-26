@@ -14,6 +14,14 @@ sys.path.insert(0, project_root)  # Add project root to path
 # Verify the path is added
 print(f"Current PYTHONPATH: {sys.path}")
 
+# Print project_root and aibox_path
+print(f"Project root: {project_root}")
+print(f"aibox path: {aibox_path}")
+
+# List contents of project_root and aibox_path
+print(f"Contents of project root ({project_root}): {os.listdir(project_root)}")
+print(f"Contents of aibox path ({aibox_path}): {os.listdir(aibox_path)}")
+
 try:
     from aibox.controller import TaskController
     from aibox.bracelet import BraceletController
