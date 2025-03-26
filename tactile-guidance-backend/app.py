@@ -1,6 +1,6 @@
 import sys
 import os
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 import cv2
 import json
 
@@ -28,12 +28,15 @@ try:
     print("Successfully imported aibox modules")
 except ImportError as e:
     print(f"Error importing aibox modules: {e}")
-    # Print more detailed import error information
     import traceback
     traceback.print_exc()
     sys.exit(1)
 
 app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Welcome to the Tactile Guidance System!"
 
 @app.route('/activate_camera', methods=['POST'])
 def activate_camera():
@@ -78,8 +81,6 @@ def activate_bracelet():
             source='0'
         )
         
-        # For demonstration, we'll just return success
-        # In reality, you'd call task_controller.experimental_loop()
         return jsonify({
             "message": "Bracelet guidance system initialized",
             "participant": participant
@@ -87,5 +88,21 @@ def activate_bracelet():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+def generate_frames():
+    camera = cv2.VideoCapture(0)
+    while True:
+        success, frame = camera.read()
+        if not success:
+            break
+        else:
+            ret, buffer = cv2.imencode('.jpg', frame)
+            frame = buffer.tobytes()
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+
+@app.route('/video_feed')
+def video_feed():
+    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=8000, debug=True, use_reloader=False)
