@@ -1,0 +1,26 @@
+import numpy as np
+from aibox.bracelet import BraceletController
+from pybelt.belt_controller import BeltVibrationPattern, BeltOrientationType
+
+# Initialize the BraceletController with default intensities
+bracelet_controller = BraceletController()
+
+# Mock data for bounding boxes
+hand_bb = [100, 100, 50, 50]  # [x_center, y_center, width, height]
+target_bb = [200, 200, 50, 50]  # [x_center, y_center, width, height]
+bboxes = [hand_bb + [0, 0, 1.0], target_bb + [1, 0, 1.0]]  # add id, cls, conf
+
+# Mock depth image
+depth_img = np.zeros((480, 640))
+
+# Call the navigate_hand function
+overlapping, frozen_target = bracelet_controller.navigate_hand(
+    belt_controller=None,  # assuming no actual belt connected for testing
+    bboxes=bboxes,
+    target_cls=0,
+    hand_clss=[1],
+    depth_img=depth_img
+)
+
+print(f"Overlapping: {overlapping}")
+print(f"Frozen target: {frozen_target}")
