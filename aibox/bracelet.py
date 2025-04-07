@@ -3,8 +3,8 @@ from pybelt.belt_controller import (BeltConnectionState, BeltController,
                                     BeltControllerDelegate, BeltMode,
                                     BeltOrientationType,
                                     BeltVibrationTimerOption, BeltVibrationPattern)
-from auto_connect import interactive_belt_connect, setup_logger
-from resources.depth_navigation_functions import map_obstacles, check_obstacles_between_points, find_obstacle_target_point
+from .auto_connect import interactive_belt_connect, setup_logger
+from .resources.depth_navigation_functions import map_obstacles, check_obstacles_between_points, find_obstacle_target_point
 import time
 
 
