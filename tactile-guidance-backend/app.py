@@ -11,45 +11,52 @@ import logging
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
 
-# ✅ Correct path configuration
+# Correct path configuration to find the aibox module
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.append(project_root)
 
-# ✅ Load aibox modules
+# Verify if aibox exists
 aibox_path = os.path.join(project_root, 'aibox')
 if not os.path.isdir(aibox_path):
-    logging.error(f"❌ Error: aibox directory not found at {aibox_path}")
+    logging.error(f"Error: aibox directory not found at {aibox_path}")
     sys.exit(1)
 
 try:
     from aibox.bracelet import connect_belt, BraceletController
-    logging.info("✅ Successfully imported aibox modules")
+    logging.info("Successfully imported aibox modules")
 except ImportError as e:
-    logging.error(f"❌ Failed to import from aibox.bracelet: {e}")
+    logging.error(f"Failed to import from aibox.bracelet: {e}")
     sys.exit(1)
 
-# ✅ Flask App
+# Flask app initialization
 app = Flask(__name__)
 
-# ✅ Load YOLOv5 model (COCO)
+# Load YOLOv5 model
 model_yolo = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
 
-# ✅ Load hand detection model
+# Load hand detection model
 hand_model_path = os.path.join(aibox_path, 'hand.pt')
 if not os.path.isfile(hand_model_path):
-    logging.error(f"❌ Error: hand.pt file not found at {hand_model_path}")
+    logging.error(f"Error: hand.pt file not found at {hand_model_path}")
     sys.exit(1)
 
 model_hand = torch.hub.load('ultralytics/yolov5', 'custom', path=hand_model_path)
-model_hand.conf = 0.7  # Lower threshold to improve detection frequency
 
-# ✅ Debug: Print hand model class names
-logging.info(f"🧠 Hand model classes: {model_hand.names}")
+# COCO labels
+coco_labels = [
+    "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
+    "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat",
+    "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "backpack",
+    "umbrella", "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball",
+    "kite", "baseball bat", "baseball glove", "skateboard", "surfboard", "tennis racket",
+    "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple",
+    "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake",
+    "chair", "couch", "potted plant", "bed", "dining table", "toilet", "tv", "laptop",
+    "mouse", "remote", "keyboard", "cell phone", "microwave", "oven", "toaster", "sink",
+    "refrigerator", "book", "clock", "vase", "scissors", "teddy bear", "hair drier", "toothbrush"
+]
 
-# ✅ COCO labels
-coco_labels = model_yolo.names
-
-# ✅ Camera detection
+# Camera detection
 camera_index = next((i for i in range(10) if cv2.VideoCapture(i).isOpened()), 0)
 video_camera = None
 bracelet_controller = None
@@ -67,7 +74,7 @@ def video_feed():
 def get_detected_objects():
     global video_camera
     if video_camera is None:
-        video_camera = cv2.VideoCapture(camera_index)
+        video_camera = cv2.VideoCapture(camera_index if camera_index is not None else 0)
 
     if not video_camera.isOpened():
         return jsonify([])
@@ -76,11 +83,10 @@ def get_detected_objects():
     if not ret:
         return jsonify([])
 
-    found = set()
+    results = model_yolo(frame)
+    detections = results.xyxy[0].cpu().numpy()
 
-    # COCO object detection
-    yolo_results = model_yolo(frame)
-    detections = yolo_results.xyxy[0].cpu().numpy()
+    found = set()
     for det in detections:
         if len(det) < 6:
             continue
@@ -88,24 +94,7 @@ def get_detected_objects():
         cls = int(cls)
         if 0 <= cls < len(coco_labels):
             label = coco_labels[cls]
-            if label.lower() != 'person':
-                found.add(label)
-
-    # Hand model detection
-    hand_results = model_hand(frame)
-    hand_detections = hand_results.xyxy[0].cpu().numpy()
-    for det in hand_detections:
-        if len(det) < 6:
-            continue
-        _, _, _, _, conf, cls = det
-        cls = int(cls)
-        if 0 <= cls < len(model_hand.names):
-            label = model_hand.names[cls]
-            # Map all hand-related labels to 'hand'
-            if label.lower() in ['myleft', 'myright', 'myhand', 'yourleft', 'yourright']:
-                found.add('hand')
-            else:
-                found.add(label)
+            found.add(label)
 
     return jsonify(list(found) if found else ["No recognizable objects detected."])
 
@@ -133,43 +122,33 @@ def generate_frames():
             break
 
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results_yolo = model_yolo(frame)
+        detections_yolo = results_yolo.xyxy[0].cpu().numpy()
 
-        # YOLO object detection
-        yolo_results = model_yolo(frame)
-        detections_yolo = yolo_results.xyxy[0].cpu().numpy()
         for det in detections_yolo:
             if len(det) < 6:
                 continue
             x1, y1, x2, y2, conf, cls = det
             cls = int(cls)
-            if 0 <= cls < len(coco_labels):
-                label = coco_labels[cls]
-                if label.lower() != 'person':
-                    cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (255, 0, 0), 2)
-                    cv2.putText(frame, label, (int(x1), int(y1) - 10),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+            if cls < 0 or cls >= len(coco_labels):
+                continue
+            label = coco_labels[cls]
+            cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (255, 0, 0), 2)
+            cv2.putText(frame, label, (int(x1), int(y1) - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
 
-        # Hand detection
         hand_results = model_hand(frame)
         detections_hand = hand_results.xyxy[0].cpu().numpy()
-        hand_count = 0
+
         for det in detections_hand:
             if len(det) < 6:
                 continue
             x1, y1, x2, y2, conf, cls = det
             cls = int(cls)
-            if 0 <= cls < len(model_hand.names):
-                label = model_hand.names[cls]
-                # Map all hand-related labels to 'hand'
-                display_label = "hand" if label.lower() in ['myleft', 'myright', 'myhand', 'yourleft', 'yourright'] else label
-                hand_count += 1
-                cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
-                cv2.putText(frame, display_label, (int(x1), int(y1) - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-
-        # Draw number of hands detected
-        cv2.putText(frame, f"Hands: {hand_count}", (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+            label = "hand"
+            cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
+            cv2.putText(frame, label, (int(x1), int(y1) - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
         ret, buffer = cv2.imencode('.jpg', frame)
         frame = buffer.tobytes()
@@ -196,6 +175,7 @@ def guide_bracelet_to_object(target_cls):
         if not ret:
             break
 
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         yolo_results = model_yolo(frame)
         detections_yolo = yolo_results.xyxy[0].cpu().numpy()
 
@@ -205,27 +185,26 @@ def guide_bracelet_to_object(target_cls):
                 continue
             x1, y1, x2, y2, conf, cls = det
             cls = int(cls)
-            if 0 <= cls < len(coco_labels):
-                label = coco_labels[cls]
-                if label.lower() != 'person':
-                    bboxes.append([x1, y1, x2 - x1, y2 - y1, i, label, conf])
+            if cls < 0 or cls >= len(coco_labels):
+                continue
+            label = coco_labels[cls]
+            bboxes.append([x1, y1, x2 - x1, y2 - y1, i, label, conf])
 
         hand_results = model_hand(frame)
         detections_hand = hand_results.xyxy[0].cpu().numpy()
+
         for det in detections_hand:
             if len(det) < 6:
                 continue
             x1, y1, x2, y2, conf, cls = det
             cls = int(cls)
-            if 0 <= cls < len(model_hand.names):
-                label = model_hand.names[cls]
-                # Map all hand-related labels to 'hand'
-                label = "hand" if label.lower() in ['myleft', 'myright', 'myhand', 'yourleft', 'yourright'] else label
-                bboxes.append([x1, y1, x2 - x1, y2 - y1, 999, label, 0.99])
+            label = "hand"
+            bboxes.append([x1, y1, x2 - x1, y2 - y1, 999, label, 0.99])
 
+        # Bu kısımda bboxes listenizi kontrol edin ve hedef nesneyi bulun
         target_bbox = None
         for bbox in bboxes:
-            if bbox[5].lower() == target_cls.lower():
+            if bbox[5] == target_cls:
                 target_bbox = bbox
                 break
 
@@ -240,6 +219,5 @@ def guide_bracelet_to_object(target_cls):
 
         time.sleep(0.5)
 
-# ✅ Main entry point
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=8000, debug=True)
