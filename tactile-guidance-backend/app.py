@@ -5,7 +5,9 @@ import json
 import numpy as np
 import torch
 import time
+import threading
 from flask import Flask, request, jsonify, Response
+from ultralytics import YOLO
 import logging
 
 # Configure logging
@@ -15,7 +17,6 @@ logging.basicConfig(level=logging.DEBUG)
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.append(project_root)
 
-# Verify if aibox exists
 aibox_path = os.path.join(project_root, 'aibox')
 if not os.path.isdir(aibox_path):
     logging.error(f"Error: aibox directory not found at {aibox_path}")
@@ -28,21 +29,15 @@ except ImportError as e:
     logging.error(f"Failed to import from aibox.bracelet: {e}")
     sys.exit(1)
 
-# Flask app initialization
 app = Flask(__name__)
 
-# Load YOLOv5 model
+# Load YOLOv5 model for object detection
 model_yolo = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
 
-# Load hand detection model
-hand_model_path = os.path.join(aibox_path, 'hand.pt')
-if not os.path.isfile(hand_model_path):
-    logging.error(f"Error: hand.pt file not found at {hand_model_path}")
-    sys.exit(1)
+# Load YOLOv8 hand detection model
+model_hand = YOLO("hand_yolov8s.pt")  # Ensure the model is in the same directory
 
-model_hand = torch.hub.load('ultralytics/yolov5', 'custom', path=hand_model_path)
-
-# COCO labels
+# COCO labels for YOLOv5
 coco_labels = [
     "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
     "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat",
@@ -56,7 +51,6 @@ coco_labels = [
     "refrigerator", "book", "clock", "vase", "scissors", "teddy bear", "hair drier", "toothbrush"
 ]
 
-# Camera detection
 camera_index = next((i for i in range(10) if cv2.VideoCapture(i).isOpened()), 0)
 video_camera = None
 bracelet_controller = None
@@ -74,7 +68,7 @@ def video_feed():
 def get_detected_objects():
     global video_camera
     if video_camera is None:
-        video_camera = cv2.VideoCapture(camera_index if camera_index is not None else 0)
+        video_camera = cv2.VideoCapture(camera_index)
 
     if not video_camera.isOpened():
         return jsonify([])
@@ -83,18 +77,34 @@ def get_detected_objects():
     if not ret:
         return jsonify([])
 
-    results = model_yolo(frame)
-    detections = results.xyxy[0].cpu().numpy()
+    yolo_results = []
+    def detect_objects():
+        yolo_results.append(model_yolo(frame))
 
+    t1 = threading.Thread(target=detect_objects)
+    t1.start()
+    t1.join()
+
+    hand_results = model_hand(frame)
     found = set()
+
+    # YOLOv5 detections
+    detections = yolo_results[0].xyxy[0].cpu().numpy()
     for det in detections:
         if len(det) < 6:
             continue
         _, _, _, _, conf, cls = det
         cls = int(cls)
         label = coco_labels[cls]
-        if conf > 0.5 and 0 <= cls < len(coco_labels) and label != "person":  # "person" filtering
+        if conf > 0.5 and 0 <= cls < len(coco_labels) and label != "person":
             found.add(label)
+
+    # YOLOv8 hand detection
+    if hand_results and hand_results[0].boxes is not None:
+        for conf in hand_results[0].boxes.conf.cpu().numpy():
+            if conf > 0.3:
+                found.add("hand")
+                break
 
     return jsonify(list(found) if found else ["No recognizable objects detected."])
 
@@ -121,9 +131,8 @@ def generate_frames():
         if not success:
             break
 
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results_yolo = model_yolo(frame)
-        detections_yolo = results_yolo.xyxy[0].cpu().numpy()
+        yolo_results = model_yolo(frame)
+        detections_yolo = yolo_results.xyxy[0].cpu().numpy()
 
         for det in detections_yolo:
             if len(det) < 6:
@@ -131,24 +140,17 @@ def generate_frames():
             x1, y1, x2, y2, conf, cls = det
             cls = int(cls)
             label = coco_labels[cls]
-            if conf > 0.5 and label != "person":  # "person" filtering
+            if conf > 0.5 and label != "person":
                 cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (255, 0, 0), 2)
                 cv2.putText(frame, label, (int(x1), int(y1) - 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
 
         hand_results = model_hand(frame)
-        detections_hand = hand_results.xyxy[0].cpu().numpy()
-
-        for det in detections_hand:
-            if len(det) < 6:
-                continue
-            x1, y1, x2, y2, conf, cls = det
-            cls = int(cls)
-            if conf > 0.5:  # Confidence threshold added
-                label = "hand"
-                cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
-                cv2.putText(frame, label, (int(x1), int(y1) - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        if hand_results and hand_results[0].boxes is not None:
+            for box in hand_results[0].boxes.xyxy.cpu().numpy():
+                x1, y1, x2, y2 = map(int, box[:4])
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.putText(frame, "hand", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
         ret, buffer = cv2.imencode('.jpg', frame)
         frame = buffer.tobytes()
@@ -157,7 +159,6 @@ def generate_frames():
 def guide_bracelet_to_object(target_cls):
     global bracelet_controller, belt_controller
 
-    # Initialize bracelet controller if not already initialized
     if bracelet_controller is None:
         bracelet_controller = BraceletController()
         if hasattr(bracelet_controller, 'init'):
@@ -166,14 +167,12 @@ def guide_bracelet_to_object(target_cls):
             })
         logging.info("Bracelet controller initialized.")
 
-    # Connect to the bracelet
     if not belt_controller:
         connected, belt_controller = connect_belt()
         if not connected:
             raise Exception("Could not connect to bracelet")
         logging.info("Bracelet connected successfully.")
 
-    # Start video capture
     cap = cv2.VideoCapture(camera_index)
     if not cap.isOpened():
         raise Exception("Could not open camera.")
@@ -186,9 +185,6 @@ def guide_bracelet_to_object(target_cls):
                 logging.warning("Failed to read frame from camera.")
                 break
 
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-            # Detect objects
             yolo_results = model_yolo(frame)
             detections_yolo = yolo_results.xyxy[0].cpu().numpy()
 
@@ -199,30 +195,17 @@ def guide_bracelet_to_object(target_cls):
                 x1, y1, x2, y2, conf, cls = det
                 cls = int(cls)
                 label = coco_labels[cls]
-                if conf > 0.5 and label != "person":  # "person" filtering
+                if conf > 0.5 and label != "person":
                     bboxes.append([x1, y1, x2 - x1, y2 - y1, i, label, conf])
 
-            # Detect hands
             hand_results = model_hand(frame)
-            detections_hand = hand_results.xyxy[0].cpu().numpy()
+            if hand_results and hand_results[0].boxes is not None:
+                for box in hand_results[0].boxes.xyxy.cpu().numpy():
+                    x1, y1, x2, y2 = box[:4]
+                    bboxes.append([x1, y1, x2 - x1, y2 - y1, 999, "hand", 0.99])
 
-            for det in detections_hand:
-                if len(det) < 6:
-                    continue
-                x1, y1, x2, y2, conf, cls = det
-                cls = int(cls)
-                if conf > 0.5:  # Confidence threshold added
-                    label = "hand"
-                    bboxes.append([x1, y1, x2 - x1, y2 - y1, 999, label, 0.99])
+            target_bbox = next((b for b in bboxes if b[5] == target_cls), None)
 
-            # Find the target object
-            target_bbox = None
-            for bbox in bboxes:
-                if bbox[5] == target_cls:
-                    target_bbox = bbox
-                    break
-
-            # Guide bracelet if target is found
             if target_bbox:
                 logging.info(f"Target '{target_cls}' found. Guiding bracelet.")
                 bracelet_controller.navigate_hand(
@@ -235,7 +218,7 @@ def guide_bracelet_to_object(target_cls):
             else:
                 logging.info(f"Target '{target_cls}' not found in the current frame.")
 
-            time.sleep(0.5)  # Reduce frame processing frequency for efficiency
+            time.sleep(0.5)
 
     except Exception as e:
         logging.error(f"Error during bracelet guidance: {e}")
