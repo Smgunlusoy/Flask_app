@@ -92,8 +92,8 @@ def get_detected_objects():
             continue
         _, _, _, _, conf, cls = det
         cls = int(cls)
-        if 0 <= cls < len(coco_labels):
-            label = coco_labels[cls]
+        label = coco_labels[cls]
+        if conf > 0.5 and 0 <= cls < len(coco_labels) and label != "person":  # "person" filtering
             found.add(label)
 
     return jsonify(list(found) if found else ["No recognizable objects detected."])
@@ -130,12 +130,11 @@ def generate_frames():
                 continue
             x1, y1, x2, y2, conf, cls = det
             cls = int(cls)
-            if cls < 0 or cls >= len(coco_labels):
-                continue
             label = coco_labels[cls]
-            cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (255, 0, 0), 2)
-            cv2.putText(frame, label, (int(x1), int(y1) - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+            if conf > 0.5 and label != "person":  # "person" filtering
+                cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (255, 0, 0), 2)
+                cv2.putText(frame, label, (int(x1), int(y1) - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
 
         hand_results = model_hand(frame)
         detections_hand = hand_results.xyxy[0].cpu().numpy()
@@ -145,10 +144,11 @@ def generate_frames():
                 continue
             x1, y1, x2, y2, conf, cls = det
             cls = int(cls)
-            label = "hand"
-            cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
-            cv2.putText(frame, label, (int(x1), int(y1) - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            if conf > 0.5:  # Confidence threshold added
+                label = "hand"
+                cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
+                cv2.putText(frame, label, (int(x1), int(y1) - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
         ret, buffer = cv2.imencode('.jpg', frame)
         frame = buffer.tobytes()
@@ -157,67 +157,91 @@ def generate_frames():
 def guide_bracelet_to_object(target_cls):
     global bracelet_controller, belt_controller
 
+    # Initialize bracelet controller if not already initialized
     if bracelet_controller is None:
         bracelet_controller = BraceletController()
         if hasattr(bracelet_controller, 'init'):
             bracelet_controller.init(vibration_intensities={
                 'bottom': 50, 'top': 50, 'left': 50, 'right': 50
             })
+        logging.info("Bracelet controller initialized.")
 
+    # Connect to the bracelet
     if not belt_controller:
         connected, belt_controller = connect_belt()
         if not connected:
             raise Exception("Could not connect to bracelet")
+        logging.info("Bracelet connected successfully.")
 
+    # Start video capture
     cap = cv2.VideoCapture(camera_index)
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
+    if not cap.isOpened():
+        raise Exception("Could not open camera.")
+    logging.info("Camera opened successfully for bracelet guidance.")
 
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        yolo_results = model_yolo(frame)
-        detections_yolo = yolo_results.xyxy[0].cpu().numpy()
-
-        bboxes = []
-        for i, det in enumerate(detections_yolo):
-            if len(det) < 6:
-                continue
-            x1, y1, x2, y2, conf, cls = det
-            cls = int(cls)
-            if cls < 0 or cls >= len(coco_labels):
-                continue
-            label = coco_labels[cls]
-            bboxes.append([x1, y1, x2 - x1, y2 - y1, i, label, conf])
-
-        hand_results = model_hand(frame)
-        detections_hand = hand_results.xyxy[0].cpu().numpy()
-
-        for det in detections_hand:
-            if len(det) < 6:
-                continue
-            x1, y1, x2, y2, conf, cls = det
-            cls = int(cls)
-            label = "hand"
-            bboxes.append([x1, y1, x2 - x1, y2 - y1, 999, label, 0.99])
-
-        # Bu kısımda bboxes listenizi kontrol edin ve hedef nesneyi bulun
-        target_bbox = None
-        for bbox in bboxes:
-            if bbox[5] == target_cls:
-                target_bbox = bbox
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                logging.warning("Failed to read frame from camera.")
                 break
 
-        if target_bbox:
-            bracelet_controller.navigate_hand(
-                belt_controller,
-                [target_bbox],
-                target_cls,
-                hand_clss=["hand"],
-                depth_img=None
-            )
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-        time.sleep(0.5)
+            # Detect objects
+            yolo_results = model_yolo(frame)
+            detections_yolo = yolo_results.xyxy[0].cpu().numpy()
+
+            bboxes = []
+            for i, det in enumerate(detections_yolo):
+                if len(det) < 6:
+                    continue
+                x1, y1, x2, y2, conf, cls = det
+                cls = int(cls)
+                label = coco_labels[cls]
+                if conf > 0.5 and label != "person":  # "person" filtering
+                    bboxes.append([x1, y1, x2 - x1, y2 - y1, i, label, conf])
+
+            # Detect hands
+            hand_results = model_hand(frame)
+            detections_hand = hand_results.xyxy[0].cpu().numpy()
+
+            for det in detections_hand:
+                if len(det) < 6:
+                    continue
+                x1, y1, x2, y2, conf, cls = det
+                cls = int(cls)
+                if conf > 0.5:  # Confidence threshold added
+                    label = "hand"
+                    bboxes.append([x1, y1, x2 - x1, y2 - y1, 999, label, 0.99])
+
+            # Find the target object
+            target_bbox = None
+            for bbox in bboxes:
+                if bbox[5] == target_cls:
+                    target_bbox = bbox
+                    break
+
+            # Guide bracelet if target is found
+            if target_bbox:
+                logging.info(f"Target '{target_cls}' found. Guiding bracelet.")
+                bracelet_controller.navigate_hand(
+                    belt_controller,
+                    [target_bbox],
+                    target_cls,
+                    hand_clss=["hand"],
+                    depth_img=None
+                )
+            else:
+                logging.info(f"Target '{target_cls}' not found in the current frame.")
+
+            time.sleep(0.5)  # Reduce frame processing frequency for efficiency
+
+    except Exception as e:
+        logging.error(f"Error during bracelet guidance: {e}")
+    finally:
+        cap.release()
+        logging.info("Camera released after bracelet guidance.")
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=8000, debug=True)
