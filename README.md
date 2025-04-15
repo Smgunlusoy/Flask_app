@@ -40,22 +40,79 @@ You do not need all the YOLOv5 files, just the following:
 If you clone this repo, YOLOv5 is already set up properly and you only need to separately install the YOLOv8 packages into your environment.
 
 
-### Exporting models for use with the NLInterface Android App
+## Features of Flask App
 
-These models can be used in the Android app developed during the study project "Making blind people grasp" in 2023/2024 lead by Peter König.
-The script for that is located in `aibox/app_export.py` and works for the hand detection as well as object detection.
+### 1. Home Route (`/`)
+- Provides a status message confirming that the backend is live and operational.
+- Example Output: `✅ Tactile Guidance Flask Backend is Live!`
 
-To export the hand detection model, first export it as a tensorflow saved model using the default export script.
+### 2. Live Video Feed (`/video_feed`)
+- Streams live video frames from a connected camera.
+- Highlights detected objects and hands in real-time using:
+  - **YOLOv5** for general object detection.
+  - **YOLOv8** specifically for hand detection.
 
+### 3. Object Detection (`/detected_objects`)
+- Captures a frame from the live video feed and detects:
+  - Objects (e.g., "bottle", "chair") using pre-trained YOLOv5.
+  - Hands using YOLOv8.
+- Returns a list of detected objects in JSON format.
+- Example Output:
+  ```json
+  ["bottle", "chair", "hand"]
+  ```
+
+### 4. Activate Bracelet (`/activate_bracelet`)
+- Guides a tactile bracelet to navigate towards a specific object.
+- Accepts a JSON payload with the target object name. Example:
+  ```json
+  { "object_name": "bottle" }
+  ```
+- Returns a success or error message.
+
+### 5. Guidance Mechanism
+- Integrates a tactile bracelet to provide navigation feedback.
+- Uses vibration cues to guide users towards detected objects.
+- Supports initialization and connection to the bracelet via:
+  - `BraceletController` for frame-wise navigation.
+  - `TaskController` for navigation logic.
+
+### 6. YOLO Integration
+- **YOLOv5**: Pre-trained on COCO dataset for object detection.
+- **YOLOv8**: Customized for hand detection.
+- Thresholds and configurations are customizable.
+
+---
+
+## Installation
+
+### Step 1: Clone the Repository
 ```bash
-$ cd aibox
-$ python export.py --weights hand.pt --include saved_model --keras
+git clone https://github.com/Smgunlusoy/Flask_app.git
+cd Flask_app
 ```
-This will create the `hand_saved_model` directory.
 
-After that you can convert it for the Tensorflow-Lite Runtime using
+### Step 2: Set Up the Environment
+- Install required Python packages:
+  ```bash
+  pip install -r requirements.txt
+  ```
 
-```bash
-$ python app_export.py --hands hand_saved_model --output hands.tflite
-```
-To run the master.py file, change directory into the aibox folder before executing the code (pathing issue).
+- Install YOLO models:
+  ```bash
+  pip install ultralytics
+  ```
+
+- Ensure the YOLOv5 files (`models`, `utils`, `export.py`) are correctly placed in the repository.
+
+### Step 3: Run the Application
+- Start the Flask server:
+  ```bash
+  python tactile-guidance-backend/app.py
+  ```
+- Access the app at `http://localhost:8000`.
+
+
+## Reference
+![AIBox Paradigm](https://github.com/pippowell/OptiVisT/blob/main/aibox/file_guide_opti.png)
+
