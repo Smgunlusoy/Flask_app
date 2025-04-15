@@ -55,6 +55,30 @@ class BraceletController:
         self.freezing_time = 'NA'
         self.grasping_time = 'NA'
 
+    def vibrate_direction(self, belt_controller, horizontal, vertical):
+        orientation_map = {
+            "top": 0,
+            "bottom": 180,
+            "left": 270,
+            "right": 90,
+            "center": -1  # No vibration
+    }
+
+        angle = orientation_map.get(horizontal)
+        if angle == -1:
+            angle = orientation_map.get(vertical)
+
+        if angle == -1:
+            belt_controller.stop_vibration()
+        else:
+            belt_controller.send_vibration_command(
+                channel_index=0,
+                pattern=BeltVibrationPattern.CONTINUOUS,
+                intensity=50,
+                orientation_type=BeltOrientationType.ANGLE,
+                orientation=angle
+        )
+
 
     def choose_detection(self, bboxes, previous_bbox=None, hand=False, w=1920, h=1080):
         """
