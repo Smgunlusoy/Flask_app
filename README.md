@@ -6,6 +6,9 @@ Piper Powell<sup>2</sup>, Florian Pätzold<sup>2</sup>, Milad Rouygari<sup>2</su
 <sup>1</sup>feelSpace GmbH, Albert-Einstein-Straße 1, 49076 Osnabrück  
 <sup>2</sup>Institute of Cognitive Science, 49060 University Osnabrück
 
+Monisa Munusamy<sup>2</sup>, Simge Ünlüsoy<sup>2</sup>
+<sup>2</sup>Institute of Cognitive Science, 49060 University Osnabrück
+
 ## Abstract
 <p align="justify">
 The problem of supporting visually impaired and blind people in meaningful interaction with objects is often neglected. To address this issue, we adapted a tactile belt for enhanced spatial navigation into a bracelet worn on the wrist that allows visually impaired people to grasp target objects. Participants' performance in locating and grasping target items when guided with the bracelet, which provides direction commands via vibrotactile signals, was compared to their performance when receiving auditory instructions. While participants were faster with the auditory commands, they also performed well with the bracelet, encouraging future development of this and similar systems.
